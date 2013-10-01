@@ -1,0 +1,394 @@
+#!/bin/zsh
+
+# STC: Swift-Turbine Compiler
+
+# Usage: stc <OPTIONS>* <INPUT> <OUTPUT>?
+# Input: Given INPUT file
+# Output: Given OUTPUT file or standard output
+# Exit code: Result from java
+
+# See help.txt or run "stc -h" for full options list
+
+# Exit codes: (cf. ExitCode.java)
+EXIT_ERROR_SCRIPT=6
+
+STC_HOME=$( cd $( dirname $0 )/.. ; /bin/pwd )
+
+STC_ENV=$STC_HOME/conf/stc-env.sh
+if [ -f ${STC_ENV} ]
+then
+  source ${STC_ENV}
+else
+  echo "Warning: Configuration file ${STC_ENV} does not exist."
+fi
+
+COMPILER_OPTS=()
+O0_OPTS=("cancel-refcounts" "piggyback-refcounts")
+O1_OPTS=("constant-fold" "dead-code-elim"
+                    "flatten-nested" "shared-constants"
+                    "forward-dataflow" "unroll-loops"
+                     "controlflow-fusion" )
+O2_OPTS=("expand-dataflow-ops" "wait-coalesce" "hoisting" "expand-loops"
+         "function-signature" "array-build")
+O3_OPTS=("pipeline" "function-inline" "reorder-insts" "algebra" "full-unroll")
+EXPERIMENTAL_OPTS=()
+
+# OUTPUT_MODE= turbine or cpp
+OUTPUT_MODE=turbine
+
+# Is preprocessor enabled?
+PREPROCESS=true
+
+typeset -T RPATH rpath
+rpath=()
+
+# Keyword args to pass to compiler
+STC_ARGS=()
+
+function get_compiler_opt_name() {
+    case $1
+        in
+        constant-fold) echo "stc.opt.constant-fold"
+                    return 0
+                    ;;
+        shared-constants) echo "stc.opt.shared-constants"
+                    return 0
+                    ;;
+        dead-code-elim) echo "stc.opt.dead-code-elim"
+                    return 0
+                    ;;
+        flatten-nested) echo "stc.opt.flatten-nested"
+                    return 0
+                    ;;
+        forward-dataflow) echo "stc.opt.forward-dataflow"
+                    return 0
+                    ;;
+        algebra) echo "stc.opt.algebra"
+                    return 0
+                    ;;
+        expand-dataflow-ops) echo "stc.opt.expand-dataflow-ops"
+                    return 0
+                    ;;
+        wait-coalesce) echo "stc.opt.wait-coalesce"
+                    return 0
+                    ;;
+        pipeline) echo "stc.opt.pipeline"
+                    return 0
+                    ;;
+        controlflow-fusion) echo "stc.opt.controlflow-fusion"
+                    return 0
+                    ;;
+        function-inline) echo "stc.opt.function-inline"
+                    return 0;
+                    ;;
+        function-signature) echo "stc.opt.function-signature"
+                    return 0;
+                    ;;
+        hoisting) echo "stc.opt.hoist"
+                    return 0
+                    ;;
+        reorder-insts) echo "stc.opt.reorder-insts"
+                    return 0
+                    ;;
+        disable-asserts) echo "stc.opt.disable-asserts"
+                    return 0
+                    ;;
+        unroll-loops) echo "stc.opt.unroll-loops"
+                    return 0
+                    ;;
+        expand-loops) echo "stc.opt.expand-loops"
+                    return 0
+                    ;;
+        full-unroll) echo "stc.opt.full-unroll"
+                    return 0
+                    ;;
+        cancel-refcounts) echo "stc.opt.cancel-refcounts"
+                    return 0
+                    ;;
+        piggyback-refcounts) echo "stc.opt.piggyback-refcounts"
+                    return 0
+                    ;;
+        array-build) echo "stc.opt.array-build"
+                    return 0
+                    ;;
+        array-switcheroo) echo "stc.array-ref-switcheroo"
+                    return 0
+                    ;;
+
+        no-stack)   echo "stc.codegen.no-stack"
+                    return 0
+                    ;;
+        no-stack-vars)
+                    echo "stc.codegen.no-stack-vars"
+                    return 0
+                    ;;
+        refcounting)
+                    echo "stc.exp.refcounting"
+                    return 0
+                    ;;
+        auto-declare)
+                    echo "stc.auto-declare"
+                    return 0
+                    ;;
+        preproc-force-gcc)
+                    echo "stc.preproc.force-gcc"
+                    return 0
+                    ;;
+        preproc-force-cpp)
+                    echo "stc.preproc.force-cpp"
+                    return 0
+                    ;;
+       *)
+         return 1
+         ;;
+    esac
+}
+
+function add_rpath() {
+  verbose "RPATH: $1"
+  rpath+=$1
+}
+
+function disable_opt() {
+  local OPTNAME=$(get_compiler_opt_name $1)
+  if [ -z "$OPTNAME" ]; then
+    echo "ERROR Invalid compiler option $1" 1>&2
+    return 1
+  fi
+  COMPILER_OPTS+="-D${OPTNAME}=false"
+}
+
+function enable_opt() {
+  local OPTNAME=$(get_compiler_opt_name $1)
+  if [ -z "$OPTNAME" ]; then
+    echo "ERROR Invalid compiler option $1" 1>&2
+    return 1
+  fi
+  COMPILER_OPTS+="-D${OPTNAME}=true"
+}
+
+OPTLEVEL=
+function set_opt_level() {
+  OPTLEVEL=$1
+  verbose "Optimization level ${OPTLEVEL}"
+  if [ ${OPTLEVEL} = 0 ]; then
+    ENABLED_OPTS=($O0_OPTS)
+    DISABLED_OPTS=($O1_OPTS $O2_OPTS $O3_OPTS $EXPERIMENTAL_OPTS)
+  elif [ ${OPTLEVEL} = 1 ]; then
+    ENABLED_OPTS=($O0_OPTS $O1_OPTS)
+    DISABLED_OPTS=($O2_OPTS $O3_OPTS $EXPERIMENTAL_OPTS)
+  elif [ ${OPTLEVEL} = 2 ]; then
+    ENABLED_OPTS=($O0_OPTS $O1_OPTS $O2_OPTS)
+    DISABLED_OPTS=($O3_OPTS $EXPERIMENTAL_OPTS)
+  elif [ ${OPTLEVEL} = 3 ]; then
+    ENABLED_OPTS=($O0_OPTS $O1_OPTS $O2_OPTS $O3_OPTS)
+    DISABLED_OPTS=($EXPERIMENTAL_OPTS)
+  elif [ ${OPTLEVEL} = X ]; then
+    ENABLED_OPTS=($O0_OPTS $O1_OPTS $O2_OPTS $O3_OPTS $EXPERIMENTAL_OPTS)
+    DISABLED_OPTS=()
+  else
+    echo "Invalid optimization level -O ${OPTLEVEL}"
+    return 1
+  fi
+  for opt in $DISABLED_OPTS; do
+    disable_opt ${opt}
+  done
+  for opt in $ENABLED_OPTS; do
+    enable_opt ${opt}
+  done
+}
+
+help()
+{
+  cat ${STC_HOME}/help.txt
+  echo
+  report_optimizations
+  exit 0
+}
+
+report_optimizations() {
+    echo "Optimization levels:"
+    echo "===================="
+    echo "All levels include optimizations from previous."
+    echo "O0 optimizations: ${O0_OPTS}"
+    echo "O1 optimizations: ${O1_OPTS}"
+    echo "O2 (default) optimizations: ${O2_OPTS}"
+    echo "O3 optimizations: ${O3_OPTS}"
+    echo "OX (experimental) optimizations: ${EXPERIMENTAL_OPTS}"
+}
+
+
+# Set this to 1 to debug this script (-V)
+VERBOSE=0
+verbose()
+{
+  if (( VERBOSE ))
+  then
+    print "stc: ${*}"
+  fi
+}
+
+report_version()
+{
+  print "STC: Swift-Turbine Compiler"
+  printf "\t for Turbine: "
+  cat ${STC_HOME}/turbine-version.txt
+  print "TURBINE_INSTALL=${TURBINE_INSTALL}"
+  print "TURBINE_HOME=${TURBINE_HOME}"
+  exit 0
+}
+
+while getopts "A:d:D:EhI:l:L:pt:T:O:C:r:uvVx" OPTION
+do
+  case ${OPTION}
+    in
+    A)  
+      STC_ARGS+="-A${OPTARG}"
+      ;;
+    d) DEBUG_PORT=${OPTARG}
+      verbose "DEBUG_PORT: ${DEBUG_PORT}"
+      ;;
+    D) 
+      STC_ARGS+="-D${OPTARG}"
+      verbose "MACRO: ${OPTARG}"
+      ;;
+    E) OUTPUT_MODE=cpp
+      COMPILER_OPTS+="-Dstc.preprocess_only=true"
+      ;;
+    h)
+      verbose "HELP:"
+      help
+      ;;
+    I) STC_ARGS+="-I${OPTARG}"
+      ;;
+    l) LOGFILE=${OPTARG}
+      verbose "LOGFILE: ${LOGFILE}"
+      ;;
+    L) LOGFILE=${OPTARG}
+      verbose "LOGFILE: ${LOGFILE} trace enabled"
+      LOGTRACE=true
+      ;;
+    p) PREPROCESS=false
+      ;;
+    r)
+      add_rpath ${OPTARG}
+      ;;
+    t) verbose "TURNOFF: ${OPTARG}"
+      disable_opt ${OPTARG}
+      ;;
+    T) verbose "TURNON: ${OPTARG}"
+      enable_opt ${OPTARG}
+      ;;
+    O)
+       set_opt_level $OPTARG
+      ;;
+    C) verbose "IC Output: ${OPTARG}"
+       COMPILER_OPTS+="-Dstc.ic.output-file=${OPTARG}"
+       ;;
+    u) STC_ARGS+="-u"
+      ;;
+    v)
+      report_version
+      ;;
+    V)
+      (( VERBOSE )) && set -x
+      VERBOSE=1
+      ;;
+    x)
+      echo "Under construction"
+      return ${EXIT_ERROR_SCRIPT}
+      ;;
+    *)
+      # getopts already printed an error message
+      return ${EXIT_ERROR_SCRIPT}
+      ;;
+  esac
+done
+
+shift $(( OPTIND-1 ))
+
+# After shifting out the options we are left with the file names
+INPUT=$1
+# This is optional (defaults to stdout)
+OUTPUT=$2
+
+if [[ -z ${OPTLEVEL} ]]
+then
+  set_opt_level 2
+fi
+
+# Clear this in case the user has set it
+unset DEBUG
+if [[ ${DEBUG_PORT} != "" ]]
+then
+  export DEBUG=-agentlib:jdwp=transport=dt_socket,server=y,address=${DEBUG_PORT}
+fi
+
+STC=${STC_HOME}/lib/stc.jar
+CLASSPATH="${STC}"
+for lib in stc antlr-3.5-complete-no-st3 log4j-1.2.16 \
+           commons-cli-1.2 commons-io-2.4 commons-lang3-3.1
+do
+  CLASSPATH+=":${STC_HOME}/lib/$lib.jar"
+done
+        
+TURBINE_VERSION=$( < ${STC_HOME}/turbine-version.txt )
+
+FLAGS=( -ea -Dstc.turbine.version=${TURBINE_VERSION} )
+if [[ ${LOGFILE} != "" ]]
+then
+  FLAGS+="-Dstc.log.file=${LOGFILE}"
+fi
+
+if [[ ${LOGTRACE} = true ]]
+then
+  FLAGS+="-Dstc.log.trace=true"
+fi
+
+if [[ ${RPATH} != "" ]]
+  then
+  FLAGS+="-Dstc.rpath=${RPATH}"
+fi
+
+#FLAGS+="
+# Check stc is compiled
+if [[ ! -f ${STC} ]]
+then
+    print "Compiled STC jar not found at path ${STC}."
+    print "Did you forget to compile STC?"
+    return ${EXIT_ERROR_SCRIPT}
+fi
+
+# Find Turbine (for include path)
+if [[ -z ${TURBINE_HOME} ]]
+then
+  if [[ -z ${TURBINE_INSTALL} ]]
+  then
+    print "Not set: TURBINE_HOME or TURBINE_INSTALL"
+    return ${EXIT_ERROR_SCRIPT}
+  else
+    export TURBINE_HOME=${TURBINE_INSTALL}
+  fi
+fi
+
+# Extra info flags
+FLAGS+="-Dstc.stc_home=${STC_HOME}";
+FLAGS+="-Dstc.turbine_home=${TURBINE_HOME}";
+FLAGS+="-Dstc.c_preprocess=${PREPROCESS}";
+
+MAIN=exm.stc.ui.Main
+
+JVM_FLAGS=()
+# Increase stack size
+JVM_FLAGS+="-Xss8m"
+# Enable assertions
+JVM_FLAGS+="-enableassertions"
+
+# Group all JVM args together
+ARGS="${JVM_FLAGS} ${DEBUG} ${FLAGS} ${COMPILER_OPTS} -cp ${CLASSPATH}"
+
+java ${=ARGS} ${MAIN} ${STC_ARGS} ${INPUT} ${OUTPUT}
+
+# Return the exit code from the java process
+EXITCODE=${?}
+return ${EXITCODE}

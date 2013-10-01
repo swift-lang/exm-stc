@@ -1,0 +1,87 @@
+
+STC HELP
+
+OPTIONS
+----------------------------------------
+    -A <argname>=<value>
+         Bind command-line argument at compile-time, allowing
+         creation of a compiled version of code specialized
+         for given setting
+    -C <output file>
+         Write intermediate representation to this file (otherwise
+            does not output it)
+    -d <PORT>
+       Use JDWP debugging on given PORT
+    -D <MACRO>
+       Define a CPP preprocessor macro
+    -E
+       Just preprocess
+    -h
+       Show all options
+    -I <DIRECTORY>
+       Add an include path
+       TURBINE_HOME/export is always included to get standard library
+    -l <LOG>
+       Log stc progress to given LOG.
+    -L <LOG>
+       Log stc progress to given LOG with trace-level logging.
+    -O <Optimization level>
+       Set compiler optimization level:
+         0 - no optimizations
+         1,2,3 - standard optimizations (DEFAULT) (this will change later)
+    -p 
+       Disable preprocessing via CPP
+    -r
+       Add an RPATH for a Swift/T extension
+    -T <option name>
+         toggle compiler option on
+    -t <option name>
+         toggle compiler option off
+    -u
+         Only compile if target is not up-to-date
+    -v
+         Output version and exit
+    -V
+         Increase verbosity.  May be given twice
+
+COMPILER OPTION NAMES
+----------------------------------------
+
+Optimization passes:
+-------------------
+constant-fold: propagate constants and do compile-time evaluation of
+      expressions
+dead-code-elim: eliminate unused variables, instructions and branches
+      (this must be enabled for most other passes to be useful)
+shared-constants: lift all constants into shared global constant region
+      and share instances of same value
+flatten-nested: flatten nested blocks
+forward-dataflow: forward dataflow analysis to eliminate common
+      subexpressions, optimize array lookups, eliminate redundant
+      loads and stores, etc
+unroll-loops: unroll loops with @unroll annotation
+expand-loops: expand small loops with fixed bounds
+full-unroll: aggressively unroll loops based on code size heuristic
+controlflow-fusion: fuse together loops over same range, etc
+expand-dataflow-ops: expand dataflow version of functions or operations
+      int explicit wait, loads, local calls, and stores
+wait-coalesce: rearrange task dependencies to minimise the number
+               of tasks/variable subscribes
+hoisting: hoist calculations out of loop bodies
+reorder-insts: try reordering instructions within block in dependency order
+pipeline: compile-time pipeline where sequentially dependent worker
+        tasks are merged into a single task
+function-inline: inline calls to functions selectively depending on
+        function size and number of calls.  This allows inter-procedural
+        optimization
+function-signature: modify function signature e.g. pass value instead
+        of future
+disable-asserts: disable assert statements (off by default)
+
+Experimental/other features:
+-------------------
+refcounting: reference counting-based garbage collection (experimental)
+auto-declare: allow omission of explicit type declarations by using
+        local type inference (experimental)
+no-stack: disable the explicit distributed stack (on by default)
+no-stack-vars: disable putting user variables in the distributed stack (on by default)

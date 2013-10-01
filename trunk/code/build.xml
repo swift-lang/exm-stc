@@ -1,0 +1,267 @@
+
+<project name="stc"
+         default="jar">
+
+  <!-- ExM STC build file
+
+       Note:
+       Eclipse generates class files in build/
+       This Ant script puts them in classes/
+       The ones in classes/ are the ones used in the output jar file
+  -->
+
+  <!-- Locations of jars and ANTLR grammar file -->
+  <property name="antlr.jar"
+            value="lib/antlr-3.5-complete-no-st3.jar"/>
+  <property name="stc.jar"
+            value="lib/stc.jar"/>
+  <property name="log4j.jar"
+            value="lib/log4j-1.2.16.jar"/>
+  <property name="commons-cli.jar"
+            value="lib/commons-cli-1.2.jar"/>
+  <property name="commons-io.jar"
+            value="lib/commons-io-2.4.jar"/>
+  <property name="commons-lang.jar"
+            value="lib/commons-lang3-3.1.jar"/>
+            
+  <property name="grammar"
+            value="src/exm/stc/ast/ExM.g"/>
+  <property name="classpath"
+            value="${antlr.jar}:${log4j.jar}:${commons-cli.jar}:${commons-io.jar}:${commons-lang.jar}"/>
+  <property name="build.dir"
+            value="classes"/>
+
+  <target name="jar"
+          depends="compile">
+    <mkdir dir="${build.dir}"/>
+    <jar destfile="${stc.jar}"
+         basedir="${build.dir}"
+         includes="**/*.class"
+         manifest="META-INF/MANIFEST.MF"/>
+  </target>
+
+  <!-- We compile the packages separately
+       This is so we can get all warnings on our code but suppress
+       warnings on ANTLR-generated code that is outside our control
+  -->
+  <target name="compile"
+          depends="compile.antlr,compile.ui,compile.gen,compile.ast,compile.ic,compile.frontend">
+  </target>
+
+  <!-- Check if the ANTLR code is up-to-date -->
+  <uptodate srcfile="${grammar}"
+            targetfile="${stc.jar}"
+            property="antlr.uptodate"/>
+
+  <!-- ANTLR output directory -->
+  <property name="antlr.pkg"
+            value="exm/stc/ast/antlr" />
+  <property name="antlr.out"
+            value="src/${antlr.pkg}" />
+
+  <!-- Compile the ANTLR-generated parser code -->
+  <target name="compile.antlr"
+          depends="antlr.generate">
+   <mkdir dir="${build.dir}" />
+   <javac srcdir="src"
+          destdir="${build.dir}"
+          includes="${antlr.pkg}/*.java"
+          listfiles="${lf}"
+          debug="true"
+          debuglevel="source,lines,vars"
+          includeantruntime="false"
+          classpath=".:${antlr.jar}"
+          target="1.6"
+          source="1.6">
+     <compilerarg value="-Xlint"/>
+     <compilerarg value="-Xlint:-cast"/>
+   </javac>
+  </target>
+
+  <!-- Call ANTLR to generate the parser code -->
+  <target name="antlr.generate"
+          unless="antlr.uptodate" >
+    <java classname="org.antlr.Tool"
+          fork="true"
+          failonerror="true">
+      <arg value="-fo"/>
+      <arg value="${antlr.out}"/>
+      <arg value="${grammar}"/>
+      <classpath>
+         <pathelement location="${antlr.jar}"/>
+      </classpath>
+    </java>
+
+    <echo message="ANTLR OK: output in: ${antlr.out}"/>
+    <!-- Delete all compiled java classes to avoid mismatch with token number
+         constants in compiled .class files-->
+    <antcall target="clean.java" />
+  </target>
+
+  <!-- Compile the AST sources -->
+  <target name="compile.ast"
+          depends="compile.common,compile.antlr">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/ast/*.java,exm/stc/ast/**/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath="${classpath}">
+      <compilerarg value="-Xlint"/>
+      <compilerarg value="-Xlint:-cast"/>
+    </javac>
+  </target>
+
+  <!-- Compile the frontend sources -->
+  <target name="compile.frontend"
+          depends="compile.common,compile.antlr,compile.ast">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/frontend/*.java,exm/stc/frontend/**/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath="${classpath}">
+      <compilerarg value="-Xlint"/>
+      <compilerarg value="-Xlint:-cast"/>
+    </javac>
+  </target>
+
+
+  <!-- Compile the IC sources -->
+  <target name="compile.ic"
+          depends="compile.frontend,compile.gen,compile.common">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/ic/*.java,exm/stc/ic/**/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath="${classpath}">
+      <compilerarg value="-Xlint"/>
+      <compilerarg value="-Xlint:-cast"/>
+    </javac>
+  </target>
+
+
+  <!-- Compile the UI -->
+  <target name="compile.ui"
+          depends="compile.antlr,compile.common">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/ui/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath="${classpath}">
+      <compilerarg value="-Xlint:-cast"/>
+    </javac>
+  </target>
+
+  <!-- Compile the common utilities-->
+  <target name="compile.common">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/common/*.java,exm/stc/common/**/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath="${classpath}">
+    </javac>
+  </target>
+
+  <!-- Compile the code generator -->
+  <target name="compile.gen"
+          depends="compile.common">
+    <javac srcdir="src"
+           destdir="${build.dir}"
+           includes="exm/stc/tclbackend/*.java,exm/stc/tclbackend/**/*.java, exm/stc/swigcbackend/*.java, exm/stc/swigcbackend/**/*.java"
+           listfiles="${lf}"
+           debug="true"
+           debuglevel="source,lines,vars"
+           includeantruntime="false"
+           classpath=".:${antlr.jar}:${log4j.jar}">
+    </javac>
+  </target>
+
+  <target name="javadoc">
+    <javadoc packagenames="exm.*"
+           excludepackagenames="exm.stc.ast.antlr.*"
+           sourcepath="src"
+           defaultexcludes="yes"
+           destdir="javadoc"
+           author="true"
+           version="true"
+           use="true"
+           access="package"
+           windowtitle="STC Compiler">
+    <doctitle><![CDATA[<h1>STC Compiler</h1>]]></doctitle>
+    <link href="http://download.oracle.com/javase/6/docs/api/" />
+    </javadoc>
+  </target>
+
+  <available property="source.txt.exists" file="source.txt"/>
+
+  <target name="source.txt"
+          unless="source.txt.exists">
+    <!-- Record source directory -->
+    <echo message="Source directory is: ${user.dir}${line.separator}"/>
+    <echo message="${user.dir}${line.separator}" file="source.txt"/>
+  </target>
+
+  <!-- Install: User must have set dist.dir -->
+  <target name="install"
+          depends="jar,source.txt">
+
+    <fail unless="dist.dir"
+          message="Target install requires -Ddist.dir=..."/>
+    <!-- Empty turbine home unless already provided -->
+    <property name="turbine.home"
+              value=""/>
+
+    <echo message="INSTALL: dist.dir=${dist.dir} turbine.home=${turbine.home}"/>
+
+
+    <mkdir dir="${dist.dir}/bin"/>
+    <mkdir dir="${dist.dir}/etc"/>
+    <mkdir dir="${dist.dir}/lib"/>
+    <copy file="turbine-version.txt" todir="${dist.dir}"/>
+    <copy file="help.txt" todir="${dist.dir}"/>
+    <copy file="etc/version.txt" todir="${dist.dir}/etc"/>
+    <copy file="source.txt" todir="${dist.dir}/etc"/>
+    <copy file="bin/stc" todir="${dist.dir}/bin"/>
+    <copy file="conf/stc-env.sh.template" toFile="${dist.dir}/conf/stc-env.sh"
+          overwrite="true">
+      <filterset>
+        <filter token="TURBINE_INSTALL" value="${turbine.home}"/>
+      </filterset>
+    </copy>
+
+    <copy todir="${dist.dir}/lib">
+      <fileset dir="lib" includes="*.jar"/>
+    </copy>
+    <chmod file="${dist.dir}/bin/stc" perm="ugo+x"/>
+  </target>
+
+  <available property="build.dir.exists" file="${build.dir}"/>
+
+  <target name="clean"
+          depends="clean.java">
+    <delete file="${stc.jar}"/>
+    <!-- Delete all ANTLR-generated stuff -->
+    <delete dir="${antlr.out}"/>
+    <delete file="source.txt"/>
+  </target>
+  <target name="clean.java" if="build.dir.exists">
+    <delete includeemptydirs="true">
+      <fileset dir="${build.dir}" includes="**/*"/>
+    </delete>
+  </target>
+
+</project>
